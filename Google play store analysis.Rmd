@@ -1,0 +1,239 @@
+---
+title: "Google play store Analysis"
+output: html_document
+---
+# Background
+
+In our project, we examine the Google app store dataset. Google's app store is the largest repository of apps and games in the world, surpassing in numbers even Apple's app store. 
+Apps are divided into categories, by the main use of the app. Most apps are free (or have an in-app payment system), and some apps cost a few dollars to download.
+
+## Goals
+
+We would like to examin a few questions in regard to this new financial ecosystem:
+
+1. Can the rating of an app be predicted by it's size, number of installs and number of reviews? 
+In other words- Is there a strategy we can find to maximize an app's rating? Does the rating increase as the number of reviews increase? Does the rating increase as the number of installs increase? We aim to try answering those question in our project.
+
+2. We would like to check if there is a significant differene between the average rating of paid and free apps. 
+
+
+## Importing the data set
+
+We will start by loading our data:
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+dataset <- read_csv("googleplaystore.csv")
+unique(dataset$Category)
+glimpse(dataset)
+```
+
+```{r}
+names(dataset)[names(dataset) == "Content Rating"] <- "Content.Rating"
+names(dataset)[names(dataset) == "Last Updated"] <- "Last.Updated"
+names(dataset)[names(dataset) == "Current Ver"] <- "Current.Ver"
+names(dataset)[names(dataset) == "Android Ver"] <- "Android.Ver"
+```
+```{r}
+colnames(dataset)
+```
+
+# Transformation, Visualization, and Modelling
+
+# Data cleaning:
+
+We notice that many numeric values are strings (for example 'size' and 'price'), So we would like to change these values into proper numeric values.
+As for categorical values (as in 'Category' and 'Type'), we will factorize them.
+As for values in 'Last updated', we will turn them from strings to proper dates.
+
+
+```{r}
+dataset$Price = as.numeric(gsub('\\$', '', dataset$Price)) #Turning 'price' values to numeric
+dataset$Size = as.numeric(gsub('\\M', '', dataset$Size)) #Turning 'size' values to numeric
+dataset$Size = as.numeric(gsub('\\k', '1.0', dataset$Size))
+dataset$Category = as.factor(dataset$Category) #Turning 'category' values to factor
+dataset$Type = as.factor(dataset$Type) #Turning 'type' values to factor
+dataset$Content.Rating = as.factor(dataset$Content.Rating)
+dataset$Last.Updated = as.POSIXct(dataset$Last.Updated,format = "%B %d, %Y",tz=Sys.timezone())
+dataset = subset(dataset, Category != '1.9') #Removing unnecessary '1.9' category
+```
+
+Regarding the 'Installs' column, we can see that the values are 'ballpark' values, divided into groups (1000+, 10,000+ etc.). In order to work with these values, we will cut the '+' sign and turn these values into numerical ones.
+As for the 'Ratings' column, we will cut values that are not confines to the 1-5 rating system, or have no value at all.
+
+```{r}
+dataset$Installs <- as.integer(str_remove_all(dataset$Installs, "[,+]"))
+dataset <- dataset  %>% filter(!is.na(Installs))
+dataset <- dataset[which(dataset$Rating < 5.1 | dataset$Rating != "NaN"),]
+```
+
+```{r}
+sum(is.na(dataset))
+glimpse(dataset)
+colSums(is.na(dataset))
+```
+
+We see that there are no null values in our database besides in the 'Size' category. These values are "Varies on device". We will keep this data for now, and omit them only when examining data by size.
+
+## Visualization
+Now that our data is sparkling clean, we can "get down to business".
+first, let us visualize the amount of apps by categories:
+
+```{r}
+dataset %>% count(Category) %>% arrange(-n) %>% 
+ ggplot(aes(reorder(Category, n), n)) + geom_col(aes(fill=Category)) + coord_flip() +
+ ggtitle("Types of Apps Available") + xlab("Category") + ylab("Count") +
+ theme(legend.position = "none")
+```
+
+As we can see, the most popular categories are by far 'Family', 'Game' and 'Tools'. 
+
+Next, we will observe the ratio between paid and free apps:
+```{r}
+dataset%>%
+  filter(!is.na(Type))%>%
+  filter(Type != '0')%>%
+  filter(Type != "NaN")%>%
+ggplot(aes(Type)) + 
+  geom_bar() +
+  labs(title = "Apps by Type (Paid/Free)", 
+       x = "", 
+       y = "Count")+
+  ylim(0,12000)
+```
+
+We can see from the chart that the vast majority of the apps are free. Note that this does not factor in the amount of 'in-app' payment apps. These apps are classified as free but require payment to unlock functions within the app.
+
+Now, lets examine how price and rating are distributed:
+
+```{r}
+ggplot(aes(x = Price), data = dataset)+
+  geom_histogram(binwidth = 5)+
+  scale_y_log10()+
+  ggtitle('Price')
+```
+
+We see that the majority of the app are free. A few apps are severely overpriced at 400$, but they are outliers within app prices.
+
+
+
+```{r}
+med = median(subset(dataset$Rating, dataset$Rating >= 0.01))
+dataset %>%
+  filter(!is.na(Rating))%>%
+  ggplot(aes(Rating))+geom_histogram(binwidth = .1)+
+  scale_x_continuous(limits = c(0, 5.1))+
+  geom_vline(xintercept = med, col = 'red')+
+  labs(title = "App Rating Histogram",
+        x = "Rating", 
+        y = "Count")
+```
+
+We see that most of the apps recieve a relatively high average rating of 4-5 (half are rated above 4.3)
+Lets see how app price category affects rating, meaning, do free apps get better ratings?
+
+```{r}
+dataset <- dataset  %>% filter(!is.nan(Type))
+ggplot(dataset, aes(x = Type, y = Rating)) + 
+   geom_boxplot() + coord_flip() + ggtitle('Rating by app price')
+```
+
+We see that free and paid apps recieve very similar ratings (about 4.3-4.4 average rating), although paid apps are slightly better rated. Both free and paid apps have outliers at low rating values.
+
+Now that we have a macro understanding of the data, we can turn to our project questions. let's see the relation between Price and Rating:
+
+```{r}
+versions = subset(dataset, Price <= 50)
+
+ggplot(aes(x = Price , y = Rating), data = versions)+
+  geom_jitter(alpha = 0.3, color = 'royalblue1')+
+  ylim(0,5.1)+
+  ggtitle('Rating vs. Price')
+```
+
+It seems that there is a connection between rating and price. The rating seems to be higher as a function of the price. Free apps recieve ratings ranging from 1-5, and payed apps recieve ratings that mostly range between 3-5. 
+This may be attributed to payed apps being better, or to people rating payed apps higher because they percieve payed apps to be of higher quality.
+
+```{r}
+ggplot(aes(x = log(Installs) , y = Rating), data = dataset)+
+  geom_jitter(alpha = 0.3, color = 'red')+
+  ylim(0,5.1)+
+  ggtitle('Rating vs. Installs')
+```
+
+It seems that as the Installs increase, so does the rating. This connection could be interpreted in a couple of ways: 1. Higher rating incourages more downloads, or 2. More downloads incourage a higher rating. In order to check which of those theories is more likely, we would need to see how the rating increased as the installs increased. That would be a nice question for a different dataset.
+
+```{r}
+ggplot(aes(x = Size , y = Rating), data = dataset)+
+  geom_jitter(alpha = 0.3, color = 'seagreen3')+
+  ylim(0,5.1)+
+  ggtitle('Rating vs. Size')
+```
+
+
+# Modeling:
+First, we will check if there is a connection between the rating of an app and it's size, number of installs and number of reviews. In order to check this, we will use a multiple linear regression model,with the Rating variable as a predicted variable and size,installs and reviews as a predictors variables. The installs variable is exponentially growing, which makes it impossible to use linear regression on it. In order to cope with this problem we will use it's log values. 
+
+```{r}
+fit1<-lm(formula = Rating ~ Size+ log(Installs) + Reviews, data= dataset)
+summary(fit1)
+```
+As we can see from the summary of this model, the size ,installs and reviews variables are significant and their p-value is very small. However we can see that the R-squared is also very small (0.01223), which means that only 0.01% of the variation in the dependent variable is explained by the independent variables. To conclude we can say that there is a very weak linear connection between number of installs, size, number of reviews and rating. Lets see which of these parameters is significant.
+
+The following chart shows the relation between App size and rating received: 
+```{r}
+dataset %>% filter(!is.na(Rating), !is.na(Size)) %>% ggplot(mapping = aes(x = Size, y = Rating))+geom_point(alpha = 0.3, color="seagreen3") + geom_smooth(method = "lm") + xlab("App size (in MB)") + ggtitle("Relationship between the app size and the rating received")
+
+fit1<-lm(formula = Rating ~ Size, data= dataset)
+summary(fit1)
+```
+  
+Next we will plot the connection between the rating received and the number of reviews of an app. Here we can see that the positive linear connection is a bit stronger than the positive linear connection between the app size and the rating it received. 
+  
+```{r}
+dataset %>% filter(!is.na(Rating), !is.na(Reviews)) %>% ggplot(mapping = aes(x = log(Reviews), y = Rating))+geom_point(color="lightpink") + geom_smooth(method = "lm") + xlab("Log(Reviews)") + ggtitle("Relationship between number of Reviews and the rating received")
+
+fit1<-lm(formula = Rating ~ Reviews, data= dataset)
+summary(fit1)
+``` 
+We see that the R-squared value is indeed higher than in the former regression. We can see that the R-squared is 0.004, which means that only 0.4% of the variation in the dependent variable is explained by the independent variable.
+
+Now let's visualize the connection between log of number of installs and rating received:
+ 
+```{r}
+dataset %>% filter(!is.na(Rating), !is.na(Reviews)) %>% ggplot(mapping = aes(x = log(Installs), y = Rating)) + geom_point(color="red") + geom_smooth(method = "lm") + xlab("Log(Installs)") + ggtitle("Relationship between number of Installs and the rating received")
+
+fit1<-lm(formula = Rating ~ log(Installs), data= dataset)
+summary(fit1)
+```
+ 
+Here we find an R-squared value that is indeed higher than in the former regressions. We can see that the R-squared is 0.014, which means that 1.4% of the variation in the dependent variable is explained by the independent variable. That is not an incredibly high value, but it is much more significant than the previous parameters. This means that the number of installs is a better indicator of rating than size or number of reviews.
+
+
+now let's move to our second hypothesis test. We would like to check if there is a significant difference between the average rating of paid and free apps. In order to test this, we will use a t-test that will check the differnce between the average rating of paid apps and free apps.
+
+* *Null Hypothesis:* The average rating of paid apps is equal to the average rating of free apps. 
+* *Alternative Hypothesis:* The average rating of paid apps is not equal to the average rating of free apps.
+
+We use two sided t-test with alpha=0.05 to determine whether the mean rating of paid and free apps are equal to each other. The assumption for the test is that both groups are sampled from normal distributions with equal variances. 
+
+
+```{r}
+t.test(dataset$Rating ~ dataset$Type, mu = 0, conf.level = 0.95,
+       paired = FALSE, alternative = "two.sided", var.equal = FALSE)
+```
+The p-value of t-test is p =  0.0003149. It’s much smaller than the significance level alpha = 0.05. In conclusion,we can say with a confidence level of 95% that there is a significant difference between the average rating of paid apps and free apps. 
+
+# Conclusion:
+
+In this project we checked two main questions:
+
+1. Can the rating of an app be predicted by it's size, number of installs and number of reviews? 
+
+2. Is there a significant differene between the average rating of paid apps and free apps? 
+
+In order to check our first question we used multiple linear regression models. We have found a weak connection between rating and app size, rating and reviews , and rating and number of installs.
+In order to check our second question we used two sided t-test with alpha=0.05, and the result of this test was significant, which means that there is a different between the average rating of paid and free apps. 
+
+Thank you for reading, and happy app shopping!
